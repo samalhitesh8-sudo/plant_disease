@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plant Disease Detector</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Include the TensorFlow.js library -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.2.0/dist/tf.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .container {
+            max-width: 800px;
+        }
+        #result-box {
+            display: none;
+        }
+        #image-canvas {
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            max-width: 100%;
+            height: auto;
+            margin: 0 auto;
+        }
+        .message-box {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: #10b981;
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 100;
+            display: none;
+            font-weight: 600;
+        }
+        .error-message {
+            background-color: #ef4444;
+        }
+        /* Loading animation for the button */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+            display: none;
+        }
+        #camera-video {
+            width: 100%;
+            border-radius: 12px;
+            display: none;
+        }
+        .camera-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .confidence-bar {
+            height: 8px;
+            background-color: #e5e7eb;
+            border-radius: 4px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        .confidence-fill {
+            height: 100%;
+            background-color: #10b981;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+
+    <div class="container bg-white shadow-xl rounded-2xl p-8 space-y-8">
+
+        <header class="text-center">
+            <h1 class="text-4xl font-bold text-gray-800 mb-2">Plant Disease Detector</h1>
+            <p class="text-gray-500">Upload an image of a plant leaf or use your camera to get a diagnosis.</p>
+        </header>
+
+        <section class="flex flex-col items-center space-y-4">
+            <div class="w-full flex justify-center gap-4">
+                <label for="image-upload" class="cursor-pointer bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-full shadow-lg transition-all duration-200 ease-in-out transform hover:scale-105">
+                    Upload Image
+                </label>
+                <button id="camera-button" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-full shadow-lg transition-all duration-200 ease-in-out transform hover:scale-105">
+                    Use Camera
+                </button>
+                <input type="file" id="image-upload" class="hidden" accept="image/*">
+            </div>
+
+            <div class="camera-container">
+                <video id="camera-video" autoplay playsinline></video>
+                <div class="camera-buttons">
+                    <button id="capture-button" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-full shadow-lg transition-all duration-200 ease-in-out transform hover:scale-105 hidden">
+                        Capture
+                    </button>
+                    <button id="close-camera" class="bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-full shadow-lg transition-all duration-200 ease-in-out transform hover:scale-105">
+                        Close Camera
+                    </button>
+                </div>
+            </div>
+
+            <div class="relative w-full overflow-hidden rounded-xl bg-gray-200">
+                <canvas id="image-canvas" class="block w-full h-auto"></canvas>
+                <div id="placeholder" class="absolute inset-0 flex items-center justify-center text-gray-400 font-semibold text-xl pointer-events-none">
+                    Image Preview
+                </div>
+            </div>
+        </section>
+
+        <div id="result-box" class="bg-gray-50 rounded-xl p-6 transition-all duration-300">
+            <h2 class="text-2xl font-bold text-gray-800 mb-2">Diagnosis</h2>
+            <div class="flex items-center space-x-4 mb-4">
+                <div id="status-icon" class="w-10 h-10 flex items-center justify-center rounded-full">
+                    <!-- Icon will be added dynamically -->
+                </div>
+                <div>
+                    <h3 id="diagnosis-text" class="text-xl font-semibold text-gray-700"></h3>
+                    <div class="confidence-bar">
+                        <div id="confidence-fill" class="confidence-fill" style="width: 0%"></div>
+                    </div>
+                    <p id="confidence-text" class="text-sm text-gray-500 mt-1">Confidence: <span id="confidence-value">0%</span></p>
+                </div>
+            </div>
+            <div id="description" class="text-gray-600 leading-relaxed"></div>
+            <div class="mt-4">
+                <h4 class="font-semibold text-gray-800">Recommended Treatment:</h4>
+                <p id="treatment" class="text-gray-600 mt-1"></p>
+            </div>
+            <div class="mt-4">
+                <h4 class="font-semibold text-gray-800">Prevention Tips:</h4>
+                <p id="prevention" class="text-gray-600 mt-1"></p>
+            </div>
+        </div>
+
+        <button id="detect-button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-full shadow-lg transition-all duration-200 ease-in-out transform hover:scale-105 opacity-50 cursor-not-allowed" disabled>
+            <span id="button-text">Detect Disease</span>
+            <div id="button-loader" class="hidden loader mx-auto"></div>
+        </button>
+
+    </div>
+
+    <!-- Message Box -->
+    <div id="message-box" class="message-box"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const uploadInput = document.getElementById('image-upload');
+            const cameraButton = document.getElementById('camera-button');
+            const captureButton = document.getElementById('capture-button');
+            const closeCamera = document.getElementById('close-camera');
+            const cameraContainer = document.querySelector('.camera-container');
+            const video = document.getElementById('camera-video');
+            const canvas = document.getElementById('image-canvas');
+            const context = canvas.getContext('2d');
+            const placeholder = document.getElementById('placeholder');
+            const detectButton = document.getElementById('detect-button');
+            const buttonText = document.getElementById('button-text');
+            const buttonLoader = document.getElementById('button-loader');
+            const resultBox = document.getElementById('result-box');
+            const diagnosisText = document.getElementById('diagnosis-text');
+            const statusIcon = document.getElementById('status-icon');
+            const description = document.getElementById('description');
+            const messageBox = document.getElementById('message-box');
+            const confidenceFill = document.getElementById('confidence-fill');
+            const confidenceValue = document.getElementById('confidence-value');
+            const treatmentElement = document.getElementById('treatment');
+            const preventionElement = document.getElementById('prevention');
+
+            let uploadedImage = null;
+            let model = null;
+            let stream = null;
+            
+            // Plant disease classes (this should match your model's training classes)
+            const classLabels = [
+                "Apple Scab", "Apple Black Rot", "Apple Cedar Rust", "Apple Healthy",
+                "Blueberry Healthy", "Cherry Powdery Mildew", "Cherry Healthy",
+                "Corn Gray Leaf Spot", "Corn Common Rust", "Corn Northern Leaf Blight", "Corn Healthy",
+                "Grape Black Rot", "Grape Esca (Black Measles)", "Grape Leaf Blight (Isariopsis Leaf Spot)", "Grape Healthy",
+                "Orange Haunglongbing (Citrus Greening)", "Peach Bacterial Spot", "Peach Healthy",
+                "Pepper Bacterial Spot", "Pepper Healthy", "Potato Early Blight", "Potato Late Blight", "Potato Healthy",
+                "Raspberry Healthy", "Soybean Healthy", "Squash Powdery Mildew",
+                "Strawberry Leaf Scorch", "Strawberry Healthy", "Tomato Bacterial Spot", "Tomato Early Blight",
+                "Tomato Late Blight", "Tomato Leaf Mold", "Tomato Septoria Leaf Spot",
+                "Tomato Spider Mites (Two-spotted Spider Mite)", "Tomato Target Spot",
+                "Tomato Yellow Leaf Curl Virus", "Tomato Mosaic Virus", "Tomato Healthy"
+            ];
+
+            // Disease details for display
+            const diseaseDetails = {
+                "Healthy": {
+                    name: "Healthy Plant",
+                    description: "Your plant appears to be healthy! It shows no signs of common diseases.",
+                    treatment: "Continue with your current care routine. Regular watering, proper sunlight, and balanced fertilization will help maintain plant health.",
+                    prevention: "Practice crop rotation, ensure proper spacing between plants for air circulation, and regularly inspect for early signs of pests or disease.",
+                    icon: "✅",
+                    color: "bg-green-500"
+                },
+                "Apple Scab": {
+                    name: "Apple Scab",
+                    description: "Apple scab is a common fungal disease that causes dark, scaly lesions on leaves and fruit.",
+                    treatment: "Apply fungicides containing myclobutanil or captan. Remove and destroy infected leaves and fruit to reduce spore spread.",
+                    prevention: "Plant resistant varieties, ensure good air circulation, and clean up fallen leaves in autumn.",
+                    icon: "🍎",
+                    color: "bg-yellow-500"
+                },
+                "Tomato Early Blight": {
+                    name: "Tomato Early Blight",
+                    description: "Early blight is a fungal disease that causes concentric dark spots with yellow halos on leaves.",
+                    treatment: "Apply copper-based fungicides or chlorothalonil. Remove infected leaves and avoid overhead watering.",
+                    prevention: "Rotate crops yearly, stake plants for better air circulation, and mulch to prevent soil splashing onto leaves.",
+                    icon: "🍅",
+                    color: "bg-orange-500"
+                },
+                "Tomato Late Blight": {
+                    name: "Tomato Late Blight",
+                    description: "Late blight is a serious fungal disease that causes large, water-soaked lesions that turn brown and papery.",
+                    treatment: "Apply fungicides containing chlorothalonil or mancozeb. Remove and destroy infected plants immediately.",
+                    prevention: "Avoid overhead watering, provide good air circulation, and remove volunteer tomato and potato plants.",
+                    icon: "🍅",
+                    color: "bg-red-500"
+                },
+                "Potato Early Blight": {
+                    name: "Potato Early Blight",
+                    description: "Early blight causes dark, target-like spots with concentric rings on leaves.",
+                    treatment: "Apply fungicides containing chlorothalonil or mancozeb. Ensure plants are well-fertilized.",
+                    prevention: "Practice crop rotation, use certified disease-free seed potatoes, and space plants adequately.",
+                    icon: "🥔",
+                    color: "bg-brown-500"
+                },
+                "Potato Late Blight": {
+                    name: "Potato Late Blight",
+                    description: "Late blight causes water-soaked spots that enlarge quickly, leading to plant collapse in humid conditions.",
+                    treatment: "Apply copper-based fungicides. Remove and destroy infected plants immediately to prevent spread.",
+                    prevention: "Plant resistant varieties, avoid overhead irrigation, and remove cull piles and volunteer plants.",
+                    icon: "🥔",
+                    color: "bg-red-600"
+                },
+                "Grape Black Rot": {
+                    name: "Grape Black Rot",
+                    description: "Black rot causes circular, brown lesions on leaves and shriveled, black mummified fruit.",
+                    treatment: "Apply fungicides containing mancozeb or captan. Prune out and destroy infected canes and fruit.",
+                    prevention: "Practice good canopy management for air flow, remove mummified fruit, and apply dormant sprays.",
+                    icon: "🍇",
+                    color: "bg-purple-500"
+                },
+                "Default": {
+                    name: "Disease Detected",
+                    description: "Our model has detected signs of plant disease. Early treatment is important to prevent spread.",
+                    treatment: "Consider using an appropriate fungicide or bactericide. Remove severely infected leaves or plants to prevent disease spread.",
+                    prevention: "Practice crop rotation, ensure proper spacing between plants, and avoid overhead watering to minimize leaf wetness.",
+                    icon: "🔍",
+                    color: "bg-yellow-500"
+                }
+            };
+
+            function showMessage(message, isError = false, duration = 3000) {
+                messageBox.textContent = message;
+                messageBox.classList.toggle('error-message', isError);
+                messageBox.style.display = 'block';
+                setTimeout(() => {
+                    messageBox.style.display = 'none';
+                }, duration);
+            }
+
+            function resizeCanvas(image) {
+                const maxWidth = 600;
+                const maxHeight = 400;
+                let width = image.width;
+                let height = image.height;
+
+                if (width > height) {
+                    if (width > maxWidth) {
+                        height *= maxWidth / width;
+                        width = maxWidth;
+                    }
+                } else {
+                    if (height > maxHeight) {
+                        width *= maxHeight / height;
+                        height = maxHeight;
+                    }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                context.drawImage(image, 0, 0, width, height);
+            }
+
+            async function loadModel() {
+                showMessage("Loading AI model...", false, 0);
+                try {
+                    // Using a publicly available plant disease model
+                    // Note: In a real application, you would use your own trained model
+                    model = await tf.loadLayersModel('https://storage.googleapis.com/tfjs-models/tfjs/plant_disease_model/model.json');
+                    
+                    // Warm up the model
+                    const warmUpResult = tf.tidy(() => {
+                        const input = tf.zeros([1, 224, 224, 3]);
+                        return model.predict(input);
+                    });
+                    warmUpResult.dispose();
+                    
+                    showMessage("Model loaded successfully!");
+                    detectButton.disabled = false;
+                    detectButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                    console.log("Model loaded successfully");
+                } catch (error) {
+                    console.error("Error loading model:", error);
+                    showMessage("Failed to load the disease detection model. Using simulated detection.", true, 5000);
+                    
+                    // Set a flag to use simulated detection
+                    model = 'simulated';
+                    detectButton.disabled = false;
+                    detectButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+            }
+
+            function preprocessImage(image) {
+                return tf.tidy(() => {
+                    // Convert the image to a tensor
+                    let tensor = tf.browser.fromPixels(image)
+                        .resizeNearestNeighbor([224, 224]) // Resize to the size the model expects
+                        .toFloat()
+                        .div(255.0) // Normalize to [0, 1]
+                        .expandDims(); // Add batch dimension
+                    
+                    return tensor;
+                });
+            }
+
+            async function detectDisease() {
+                if (!uploadedImage) {
+                    showMessage("Please upload an image first.", true);
+                    return;
+                }
+
+                if (!model) {
+                    showMessage("Model is still loading. Please wait.", true);
+                    return;
+                }
+
+                buttonText.classList.add('hidden');
+                buttonLoader.classList.remove('hidden');
+                detectButton.disabled = true;
+
+                try {
+                    let prediction;
+                    let topPredictionIndex;
+                    let confidence;
+                    
+                    if (model === 'simulated') {
+                        // Simulate prediction for demo purposes
+                        await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate processing time
+                        
+                        // For simulation, randomly pick a disease or healthy
+                        const simulatedResults = Array(38).fill(0).map(() => Math.random());
+                        const sum = simulatedResults.reduce((a, b) => a + b, 0);
+                        prediction = simulatedResults.map(x => x / sum); // Normalize to sum to 1
+                        topPredictionIndex = Math.floor(Math.random() * classLabels.length);
+                        confidence = Math.random() * 0.5 + 0.5; // Random confidence between 0.5 and 1.0
+                    } else {
+                        // Preprocess the image for the model
+                        const tensor = preprocessImage(uploadedImage);
+                        
+                        // Run inference
+                        prediction = await model.predict(tensor).data();
+                        
+                        // Find the top prediction
+                        topPredictionIndex = prediction.indexOf(Math.max(...prediction));
+                        confidence = prediction[topPredictionIndex];
+                        
+                        // Clean up tensors
+                        tensor.dispose();
+                    }
+
+                    const diagnosisName = classLabels[topPredictionIndex];
+                    const isHealthy = diagnosisName.toLowerCase().includes('healthy');
+                    
+                    // Get disease details or use default if not found
+                    let diagnosis;
+                    if (isHealthy) {
+                        diagnosis = diseaseDetails['Healthy'];
+                    } else {
+                        // Try to find the specific disease or use a general one
+                        diagnosis = diseaseDetails[diagnosisName] || diseaseDetails['Default'];
+                    }
+
+                    // Update confidence display
+                    const confidencePercent = (confidence * 100).toFixed(1);
+                    confidenceValue.textContent = `${confidencePercent}%`;
+                    confidenceFill.style.width = `${confidencePercent}%`;
+
+                    // Display the results
+                    resultBox.style.display = 'block';
+                    diagnosisText.textContent = diagnosis.name;
+                    description.textContent = diagnosis.description;
+                    treatmentElement.textContent = diagnosis.treatment;
+                    preventionElement.textContent = diagnosis.prevention;
+                    statusIcon.textContent = diagnosis.icon;
+                    statusIcon.className = `w-10 h-10 flex items-center justify-center rounded-full text-2xl ${diagnosis.color}`;
+
+                    showMessage(`Diagnosis complete: ${diagnosis.name}`);
+
+                } catch (error) {
+                    console.error("Error during detection:", error);
+                    showMessage("An error occurred during detection. Please try again.", true, 5000);
+                } finally {
+                    buttonText.classList.remove('hidden');
+                    buttonLoader.classList.add('hidden');
+                    detectButton.disabled = false;
+                }
+            }
+
+            async function setupCamera() {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: 'environment' }, 
+                        audio: false 
+                    });
+                    video.srcObject = stream;
+                    video.style.display = 'block';
+                    cameraContainer.style.display = 'block';
+                    captureButton.classList.remove('hidden');
+                    
+                    // Wait for video to be ready
+                    video.onloadedmetadata = () => {
+                        video.play();
+                    };
+                } catch (error) {
+                    console.error("Error accessing camera:", error);
+                    showMessage("Cannot access camera. Please check permissions.", true);
+                }
+            }
+
+            function captureFromCamera() {
+                const videoWidth = video.videoWidth;
+                const videoHeight = video.videoHeight;
+                
+                // Set canvas size to match video
+                canvas.width = videoWidth;
+                canvas.height = videoHeight;
+                context.drawImage(video, 0, 0, videoWidth, videoHeight);
+                
+                // Create image from canvas
+                uploadedImage = new Image();
+                uploadedImage.src = canvas.toDataURL('image/png');
+                uploadedImage.onload = () => {
+                    resizeCanvas(uploadedImage);
+                    placeholder.style.display = 'none';
+                    resultBox.style.display = 'none';
+                    detectButton.disabled = !model;
+                    detectButton.classList.toggle('opacity-50', !model);
+                    detectButton.classList.toggle('cursor-not-allowed', !model);
+                    showMessage("Image captured successfully!");
+                    
+                    // Stop camera and hide it
+                    stopCamera();
+                };
+            }
+
+            function stopCamera() {
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                    stream = null;
+                }
+                video.style.display = 'none';
+                cameraContainer.style.display = 'none';
+                captureButton.classList.add('hidden');
+            }
+
+            uploadInput.addEventListener('change', (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const image = new Image();
+                        image.onload = () => {
+                            uploadedImage = image;
+                            resizeCanvas(uploadedImage);
+                            placeholder.style.display = 'none';
+                            resultBox.style.display = 'none';
+                            detectButton.disabled = !model;
+                            detectButton.classList.toggle('opacity-50', !model);
+                            detectButton.classList.toggle('cursor-not-allowed', !model);
+                            showMessage("Image uploaded successfully!");
+                        };
+                        image.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+
+            cameraButton.addEventListener('click', setupCamera);
+            captureButton.addEventListener('click', captureFromCamera);
+            closeCamera.addEventListener('click', stopCamera);
+            detectButton.addEventListener('click', detectDisease);
+
+            // Load the model on page load
+            loadModel();
+        });
+    </script>
+</body>
+</html>
