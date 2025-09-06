@@ -17,4 +17,5 @@ st.set_page_config(
 )
 
 # Display the HTML file
-show_html_file("index.html")
+
+show_html_file("plant.html")
